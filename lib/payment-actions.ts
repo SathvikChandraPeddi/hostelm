@@ -1,6 +1,20 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import {
+    uuidSchema,
+    monthSchema,
+    validateInput,
+    sanitizeText,
+} from '@/lib/validation';
+import {
+    getAuthenticatedUser,
+    requireRole,
+    verifyStudentProfileOwnership,
+    verifyHostelOwnership,
+    verifyPaymentAccess,
+    checkRateLimit,
+} from '@/lib/security';
 
 // =============================================
 // FETCH FUNCTIONS
@@ -8,6 +22,27 @@ import { createClient } from '@/lib/supabase/server';
 
 // Fetch Student Payments
 export async function getStudentPayments(studentProfileId: string) {
+    // SECURITY: Validate input
+    const validation = validateInput(uuidSchema, studentProfileId);
+    if (!validation.success) {
+        console.error('Invalid student profile ID');
+        return [];
+    }
+
+    // SECURITY: Verify authentication
+    const authResult = await getAuthenticatedUser();
+    if (!authResult.authorized || !authResult.user) {
+        console.error('Unauthorized access attempt');
+        return [];
+    }
+
+    // SECURITY: Verify ownership
+    const isOwner = await verifyStudentProfileOwnership(authResult.user.id, studentProfileId);
+    if (!isOwner && authResult.user.role !== 'admin') {
+        console.error('Security: User attempted to access another students payments');
+        return [];
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -25,6 +60,31 @@ export async function getStudentPayments(studentProfileId: string) {
 
 // Fetch Hostel Payments (for owner view)
 export async function getHostelPayments(hostelId: string, month?: string) {
+    // SECURITY: Validate input
+    const validation = validateInput(uuidSchema, hostelId);
+    if (!validation.success) {
+        console.error('Invalid hostel ID');
+        return [];
+    }
+
+    // SECURITY: Verify authentication and role
+    const authResult = await getAuthenticatedUser();
+    if (!authResult.authorized || !authResult.user) {
+        console.error('Unauthorized access attempt');
+        return [];
+    }
+
+    // SECURITY: Verify hostel ownership (or admin)
+    if (authResult.user.role === 'owner') {
+        const isOwner = await verifyHostelOwnership(authResult.user.id, hostelId);
+        if (!isOwner) {
+            console.error('Security: Owner attempted to access another hostels payments');
+            return [];
+        }
+    } else if (authResult.user.role !== 'admin') {
+        return [];
+    }
+
     const supabase = await createClient();
 
     let query = supabase
@@ -41,7 +101,11 @@ export async function getHostelPayments(hostelId: string, month?: string) {
         .eq('hostel_id', hostelId);
 
     if (month) {
-        query = query.eq('month', month);
+        // Validate month format
+        const monthValidation = validateInput(monthSchema, month);
+        if (monthValidation.success && monthValidation.data) {
+            query = query.eq('month', monthValidation.data);
+        }
     }
 
     query = query.order('created_at', { ascending: false });
@@ -57,6 +121,21 @@ export async function getHostelPayments(hostelId: string, month?: string) {
 
 // Fetch admin payment overview (hostel-wise aggregation)
 export async function getAdminPaymentOverview(month: string) {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized admin access attempt');
+        return [];
+    }
+
+    // SECURITY: Validate month format
+    const monthValidation = validateInput(monthSchema, month);
+    if (!monthValidation.success || !monthValidation.data) {
+        console.error('Invalid month format');
+        return [];
+    }
+
     const supabase = await createClient();
 
     // Get all hostels with their payment stats for the given month
@@ -125,12 +204,37 @@ export async function getAdminPaymentOverview(month: string) {
 
 // Generate monthly dues for all students in a hostel
 export async function generateMonthlyDues(hostelId: string, month: string) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { success: false, error: 'Not authenticated' };
+    // SECURITY: Verify authentication and role
+    let user;
+    try {
+        user = await requireRole(['owner', 'admin']);
+    } catch {
+        return { success: false, error: 'Unauthorized' };
     }
+
+    // SECURITY: Validate inputs
+    const hostelValidation = validateInput(uuidSchema, hostelId);
+    const monthValidation = validateInput(monthSchema, month);
+    
+    if (!hostelValidation.success || !monthValidation.success) {
+        return { success: false, error: 'Invalid input' };
+    }
+
+    // SECURITY: Rate limiting
+    if (!checkRateLimit(user.id, 'generate-dues', 5, 60000)) {
+        return { success: false, error: 'Too many attempts. Please wait.' };
+    }
+
+    // SECURITY: Verify hostel ownership (if owner)
+    if (user.role === 'owner') {
+        const isOwner = await verifyHostelOwnership(user.id, hostelId);
+        if (!isOwner) {
+            console.error('Security: Owner attempted to generate dues for another hostel');
+            return { success: false, error: 'Unauthorized' };
+        }
+    }
+
+    const supabase = await createClient();
 
     // Get all students in this hostel
     const { data: students, error: studentsError } = await supabase
@@ -147,7 +251,7 @@ export async function generateMonthlyDues(hostelId: string, month: string) {
         .from('payments')
         .select('student_profile_id')
         .eq('hostel_id', hostelId)
-        .eq('month', month);
+        .eq('month', monthValidation.data);
 
     const existingIds = new Set((existing || []).map(p => p.student_profile_id));
 
@@ -157,7 +261,7 @@ export async function generateMonthlyDues(hostelId: string, month: string) {
         .map(s => ({
             student_profile_id: s.id,
             hostel_id: hostelId,
-            month: month,
+            month: monthValidation.data,
             amount: s.monthly_rent || 5000,
             status: 'due' as const,
         }));
@@ -180,12 +284,28 @@ export async function generateMonthlyDues(hostelId: string, month: string) {
 
 // Mark a payment as paid (owner or admin)
 export async function markPaymentAsPaid(paymentId: string, notes?: string) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { success: false, error: 'Not authenticated' };
+    // SECURITY: Verify authentication and role
+    let user;
+    try {
+        user = await requireRole(['owner', 'admin']);
+    } catch {
+        return { success: false, error: 'Unauthorized' };
     }
+
+    // SECURITY: Validate payment ID
+    const validation = validateInput(uuidSchema, paymentId);
+    if (!validation.success) {
+        return { success: false, error: 'Invalid payment ID' };
+    }
+
+    // SECURITY: Verify payment access
+    const hasAccess = await verifyPaymentAccess(user.id, paymentId, user.role);
+    if (!hasAccess) {
+        console.error('Security: User attempted to update payment they dont have access to');
+        return { success: false, error: 'Unauthorized' };
+    }
+
+    const supabase = await createClient();
 
     const { error } = await supabase
         .from('payments')
@@ -194,7 +314,7 @@ export async function markPaymentAsPaid(paymentId: string, notes?: string) {
             payment_date: new Date().toISOString(),
             marked_paid_by: user.id,
             marked_paid_at: new Date().toISOString(),
-            notes: notes || 'Marked as paid manually',
+            notes: notes ? sanitizeText(notes) : 'Marked as paid manually',
         })
         .eq('id', paymentId)
         .eq('status', 'due'); // Only update if currently "due"

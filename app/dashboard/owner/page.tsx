@@ -1,11 +1,10 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import { getOwnerHostels } from '@/lib/supabase/hostels';
 import { OwnerHostelCard } from '@/components/OwnerHostelCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Plus, Building2, User, IndianRupee, Ticket, Megaphone, Bed, TrendingUp, Users } from 'lucide-react';
+import { requireOwner } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'My Hostels | HostelM',
@@ -13,28 +12,10 @@ export const metadata = {
 };
 
 export default async function OwnerDashboardPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    // SECURITY: Require owner role from database
+    const authResult = await requireOwner('/dashboard/owner');
 
-    if (!user) {
-        redirect('/login?redirect=/dashboard/owner');
-    }
-
-    // Check if user is owner - try profile first, then auth metadata
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-    const userRole = profile?.role || user.user_metadata?.role;
-
-    if (userRole !== 'owner') {
-        redirect('/dashboard');
-    }
-
-
-    const hostels = await getOwnerHostels(user.id);
+    const hostels = await getOwnerHostels(authResult.user.id);
     
     // Calculate stats
     const totalBeds = hostels.reduce((sum, h) => sum + h.total_beds, 0);

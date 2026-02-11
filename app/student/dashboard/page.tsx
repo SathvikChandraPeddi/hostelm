@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/server';
@@ -8,6 +7,7 @@ import {
     Building2, User, Phone, MapPin, Calendar, IndianRupee, Ticket, Megaphone,
     BedDouble, Layers, CheckCircle2, AlertCircle, ChevronRight, Sparkles
 } from 'lucide-react';
+import { requireStudentWithProfile } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Dashboard | HostelM Student',
@@ -15,32 +15,29 @@ export const metadata = {
 };
 
 export default async function StudentDashboardPage() {
+    // SECURITY: Require student role and profile from database
+    const { profileId, hostelId } = await requireStudentWithProfile('/student/dashboard');
+    
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user) {
-        redirect('/login');
-    }
-
-    // Fetch student profile with hostel details
-    const { data: profile, error } = await supabase
+    // Fetch full profile data
+    const { data: profile } = await supabase
         .from('student_profiles')
-        .select(`
-            *,
-            hostels (
-                name,
-                address,
-                area,
-                owner_phone,
-                logo_url
-            )
-        `)
-        .eq('user_id', user.id)
+        .select('*')
+        .eq('id', profileId)
         .single();
 
-    if (error || !profile) {
+    if (!profile) {
+        const { redirect } = await import('next/navigation');
         redirect('/join-hostel');
     }
+
+    // Fetch hostel details for the profile
+    const { data: hostelDetails } = await supabase
+        .from('hostels')
+        .select('name, address, area, owner_phone, logo_url')
+        .eq('id', hostelId)
+        .single();
 
     // Fetch pending payments count
     const { count: dueCount } = await supabase
@@ -56,7 +53,7 @@ export default async function StudentDashboardPage() {
         .eq('student_profile_id', profile.id)
         .in('status', ['open', 'in_progress']);
 
-    const hostel = profile.hostels as {
+    const hostel = hostelDetails as {
         name: string;
         address: string;
         area: string;

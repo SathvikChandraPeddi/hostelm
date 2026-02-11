@@ -1,12 +1,11 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import { getAdminStats, getAllUsers, getAllHostelsAdmin } from '@/lib/supabase/admin';
 import { AdminStatsCards } from '@/components/admin/AdminStatsCards';
 import { UsersTable } from '@/components/admin/UsersTable';
 import { HostelsTable } from '@/components/admin/HostelsTable';
 import { Card, CardContent } from '@/components/ui/card';
 import { Shield, IndianRupee, Ticket, Megaphone, ChevronRight } from 'lucide-react';
+import { requireAdmin } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Admin Dashboard | HostelM',
@@ -14,25 +13,8 @@ export const metadata = {
 };
 
 export default async function AdminDashboardPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        redirect('/login?redirect=/dashboard/admin');
-    }
-
-    // Check if user is admin - try profile first, then auth metadata
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-    const userRole = profile?.role || user.user_metadata?.role;
-
-    if (userRole !== 'admin') {
-        redirect('/dashboard');
-    }
+    // SECURITY: Require admin role from database
+    const authResult = await requireAdmin('/dashboard/admin');
 
     // Fetch admin data
     const [stats, users, hostels] = await Promise.all([
@@ -121,7 +103,7 @@ export default async function AdminDashboardPage() {
                 {/* Tables */}
                 <div className="space-y-8">
                     <div className="animate-fadeInUp" style={{ animationDelay: '0.3s' }}>
-                        <UsersTable users={users} currentUserId={user.id} />
+                        <UsersTable users={users} currentUserId={authResult.user.id} />
                     </div>
                     <div className="animate-fadeInUp" style={{ animationDelay: '0.4s' }}>
                         <HostelsTable hostels={hostels} />

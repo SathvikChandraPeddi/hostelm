@@ -1,9 +1,9 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import { getHostelById } from '@/lib/supabase/hostels';
 import { HostelForm } from '@/components/HostelForm';
 import { ArrowLeft } from 'lucide-react';
+import { requireHostelOwner } from '@/lib/auth-guard';
 
 interface EditHostelPageProps {
     params: Promise<{ id: string }>;
@@ -20,35 +20,14 @@ export async function generateMetadata({ params }: EditHostelPageProps) {
 
 export default async function EditHostelPage({ params }: EditHostelPageProps) {
     const { id } = await params;
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        redirect(`/login?redirect=/dashboard/edit-hostel/${id}`);
-    }
-
-    // Check if user is owner - try profile first, then auth metadata
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-    const userRole = profile?.role || user.user_metadata?.role;
-
-    if (userRole !== 'owner') {
-        redirect('/dashboard');
-    }
+    
+    // SECURITY: Require owner role and verify hostel ownership
+    const { auth } = await requireHostelOwner(id, `/dashboard/edit-hostel/${id}`);
 
     const hostel = await getHostelById(id);
 
     if (!hostel) {
         notFound();
-    }
-
-    // Verify ownership
-    if (hostel.owner_id !== user.id) {
-        redirect('/dashboard/owner');
     }
 
     return (
@@ -74,7 +53,7 @@ export default async function EditHostelPage({ params }: EditHostelPageProps) {
                 </div>
 
                 {/* Form */}
-                <HostelForm hostel={hostel} userId={user.id} mode="edit" />
+                <HostelForm hostel={hostel} userId={auth.user.id} mode="edit" />
             </div>
         </div>
     );

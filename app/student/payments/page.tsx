@@ -1,8 +1,7 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getStudentProfile } from '@/lib/supabase/students';
 import { getStudentPayments } from '@/lib/payment-actions';
+import { requireStudentWithProfile } from '@/lib/auth-guard';
+import { createClient } from '@/lib/supabase/server';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Clock, ArrowLeft, IndianRupee, Info } from 'lucide-react';
 import Link from 'next/link';
@@ -34,27 +33,31 @@ export default async function StudentPaymentsPage({
 }: {
     searchParams: Promise<{ month?: string }>;
 }) {
+    // SECURITY: Require student role with active profile
+    const { profileId } = await requireStudentWithProfile('/student/payments');
+
+    // Fetch full profile data
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) redirect('/login');
-
-    const profile = await getStudentProfile(user.id);
-    if (!profile) redirect('/join-hostel');
+    const { data: profile } = await supabase
+        .from('student_profiles')
+        .select('*')
+        .eq('id', profileId)
+        .single();
 
     // Get selected month or default to current
     const resolvedParams = await searchParams;
     const currentMonth = new Date().toISOString().slice(0, 7);
     const selectedMonth = resolvedParams.month || currentMonth;
 
-    // Fetch payments
-    const payments = await getStudentPayments(profile.id);
+    // Fetch payments (backend already verifies ownership)
+    const payments = await getStudentPayments(profileId);
 
     // Check if paid for selected month
     const paymentForMonth = payments.find(p => p.month === selectedMonth);
     const isPaidForMonth = paymentForMonth?.status === 'paid';
 
-    const monthlyDues = profile.monthly_rent || 5000;
+    // Get monthly rent from first payment or default
+    const monthlyDues = paymentForMonth?.amount || 5000;
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">

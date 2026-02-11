@@ -1,6 +1,21 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import {
+    ticketSchema,
+    ticketUpdateSchema,
+    uuidSchema,
+    validateInput,
+    sanitizeText,
+} from '@/lib/validation';
+import {
+    getAuthenticatedUser,
+    requireRole,
+    verifyStudentProfileOwnership,
+    verifyHostelOwnership,
+    verifyTicketAccess,
+    checkRateLimit,
+} from '@/lib/security';
 
 // =============================================
 // STUDENT ACTIONS
@@ -8,6 +23,27 @@ import { createClient } from '@/lib/supabase/server';
 
 // Get all tickets for a student
 export async function getStudentTickets(studentProfileId: string) {
+    // SECURITY: Validate input
+    const validation = validateInput(uuidSchema, studentProfileId);
+    if (!validation.success) {
+        console.error('Invalid student profile ID');
+        return [];
+    }
+
+    // SECURITY: Verify authentication and authorization
+    const authResult = await getAuthenticatedUser();
+    if (!authResult.authorized || !authResult.user) {
+        console.error('Unauthorized access attempt');
+        return [];
+    }
+
+    // SECURITY: Verify ownership (student can only see their own tickets)
+    const isOwner = await verifyStudentProfileOwnership(authResult.user.id, studentProfileId);
+    if (!isOwner && authResult.user.role !== 'admin') {
+        console.error('Security: User attempted to access another students tickets');
+        return [];
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -30,24 +66,44 @@ export async function createTicket(
     title: string,
     description: string
 ) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
+    // SECURITY: Verify authentication
+    const authResult = await getAuthenticatedUser();
+    if (!authResult.authorized || !authResult.user) {
         return { success: false, error: 'Not authenticated' };
     }
 
-    if (!title.trim() || !description.trim()) {
-        return { success: false, error: 'Title and description are required' };
+    // SECURITY: Rate limiting
+    if (!checkRateLimit(authResult.user.id, 'create-ticket', 10, 60000)) {
+        return { success: false, error: 'Too many tickets. Please wait before creating more.' };
     }
+
+    // SECURITY: Validate all inputs
+    const validation = validateInput(ticketSchema, {
+        studentProfileId,
+        hostelId,
+        title,
+        description,
+    });
+    if (!validation.success || !validation.data) {
+        return { success: false, error: validation.error || 'Invalid input' };
+    }
+
+    // SECURITY: Verify student profile ownership
+    const isOwner = await verifyStudentProfileOwnership(authResult.user.id, studentProfileId);
+    if (!isOwner) {
+        console.error('Security: User attempted to create ticket for another student');
+        return { success: false, error: 'Unauthorized operation' };
+    }
+
+    const supabase = await createClient();
 
     const { error } = await supabase
         .from('tickets')
         .insert({
-            student_profile_id: studentProfileId,
-            hostel_id: hostelId,
-            title: title.trim(),
-            description: description.trim(),
+            student_profile_id: validation.data.studentProfileId,
+            hostel_id: validation.data.hostelId,
+            title: validation.data.title,
+            description: validation.data.description,
             status: 'open',
         });
 
@@ -65,6 +121,31 @@ export async function createTicket(
 
 // Get all tickets for a hostel (owner view)
 export async function getHostelTickets(hostelId: string, statusFilter?: string) {
+    // SECURITY: Validate input
+    const validation = validateInput(uuidSchema, hostelId);
+    if (!validation.success) {
+        console.error('Invalid hostel ID');
+        return [];
+    }
+
+    // SECURITY: Verify authentication and role
+    const authResult = await getAuthenticatedUser();
+    if (!authResult.authorized || !authResult.user) {
+        console.error('Unauthorized access attempt');
+        return [];
+    }
+
+    // SECURITY: Verify hostel ownership (or admin)
+    if (authResult.user.role === 'owner') {
+        const isOwner = await verifyHostelOwnership(authResult.user.id, hostelId);
+        if (!isOwner) {
+            console.error('Security: Owner attempted to access another hostels tickets');
+            return [];
+        }
+    } else if (authResult.user.role !== 'admin') {
+        return [];
+    }
+
     const supabase = await createClient();
 
     let query = supabase
@@ -100,12 +181,28 @@ export async function updateTicketOwner(
     status: 'open' | 'in_progress' | 'resolved',
     ownerReply?: string
 ) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { success: false, error: 'Not authenticated' };
+    // SECURITY: Verify authentication and role
+    let user;
+    try {
+        user = await requireRole('owner');
+    } catch {
+        return { success: false, error: 'Unauthorized' };
     }
+
+    // SECURITY: Validate inputs
+    const idValidation = validateInput(uuidSchema, ticketId);
+    if (!idValidation.success) {
+        return { success: false, error: 'Invalid ticket ID' };
+    }
+
+    // SECURITY: Verify ticket access
+    const hasAccess = await verifyTicketAccess(user.id, ticketId, 'owner');
+    if (!hasAccess) {
+        console.error('Security: Owner attempted to update ticket they dont own');
+        return { success: false, error: 'Unauthorized' };
+    }
+
+    const supabase = await createClient();
 
     const updateData: Record<string, unknown> = {
         status,
@@ -113,7 +210,7 @@ export async function updateTicketOwner(
     };
 
     if (ownerReply !== undefined) {
-        updateData.owner_reply = ownerReply;
+        updateData.owner_reply = sanitizeText(ownerReply);
     }
 
     if (status === 'resolved') {
@@ -139,6 +236,14 @@ export async function updateTicketOwner(
 
 // Get all tickets (admin view)
 export async function getAllTickets(statusFilter?: string, hostelFilter?: string) {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized admin access attempt');
+        return [];
+    }
+
     const supabase = await createClient();
 
     let query = supabase
@@ -181,12 +286,20 @@ export async function updateTicketAdmin(
     status: 'open' | 'in_progress' | 'resolved',
     adminNotes?: string
 ) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        return { success: false, error: 'Not authenticated' };
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        return { success: false, error: 'Unauthorized' };
     }
+
+    // SECURITY: Validate ticket ID
+    const idValidation = validateInput(uuidSchema, ticketId);
+    if (!idValidation.success) {
+        return { success: false, error: 'Invalid ticket ID' };
+    }
+
+    const supabase = await createClient();
 
     const updateData: Record<string, unknown> = {
         status,
@@ -194,7 +307,7 @@ export async function updateTicketAdmin(
     };
 
     if (adminNotes !== undefined) {
-        updateData.admin_notes = adminNotes;
+        updateData.admin_notes = sanitizeText(adminNotes);
     }
 
     if (status === 'resolved') {

@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import { HostelForm } from '@/components/HostelForm';
 import { ArrowLeft } from 'lucide-react';
+import { requireOwner } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Add Hostel | HostelM',
@@ -10,25 +10,8 @@ export const metadata = {
 };
 
 export default async function AddHostelPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        redirect('/login?redirect=/dashboard/add-hostel');
-    }
-
-    // Check if user is owner - try profile first, then auth metadata
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-    const userRole = profile?.role || user.user_metadata?.role;
-
-    if (userRole !== 'owner') {
-        redirect('/dashboard');
-    }
+    // SECURITY: Require owner role (or admin)
+    const { user } = await requireOwner('/dashboard/add-hostel');
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">

@@ -1,28 +1,23 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/server';
 import { getHostelStudents } from '@/lib/supabase/students';
 import { getHostelById } from '@/lib/supabase/hostels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, User, Phone, Building2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { requireHostelOwner } from '@/lib/auth-guard';
 
 export default async function HostelStudentsPage({ params }: { params: { hostelId: string } }) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-        redirect('/login');
-    }
-
     const { hostelId } = await params;
+    
+    // SECURITY: Require owner role and verify hostel ownership
+    await requireHostelOwner(hostelId, `/dashboard/owner/students/${hostelId}`);
 
-    // Verify ownership
+    // Fetch hostel data (already verified ownership)
     const hostel = await getHostelById(hostelId);
-
-    // Check if hostel exists and user is the owner
-    if (!hostel || hostel.owner_id !== user.id) {
+    
+    if (!hostel) {
         redirect('/dashboard/owner');
     }
 

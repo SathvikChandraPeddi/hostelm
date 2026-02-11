@@ -1,5 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getOwnerHostels } from '@/lib/supabase/hostels';
 import { getHostelTickets } from '@/lib/ticket-actions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ArrowLeft, Ticket, AlertCircle, Clock, CheckCircle2 } from 'lucide-react';
 import { OwnerTicketCard } from '@/components/OwnerTicketCard';
+import { requireOwner } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Tickets | HostelM Owner',
@@ -17,18 +16,10 @@ export default async function OwnerTicketsPage({
 }: {
     searchParams: Promise<{ hostel?: string; status?: string }>;
 }) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
+    // SECURITY: Require owner role from database
+    const authResult = await requireOwner('/dashboard/owner/tickets');
 
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-    if (profile?.role !== 'owner') redirect('/dashboard');
-
-    const hostels = await getOwnerHostels(user.id);
+    const hostels = await getOwnerHostels(authResult.user.id);
     if (hostels.length === 0) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">

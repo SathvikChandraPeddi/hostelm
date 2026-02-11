@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
+import { requireRole } from '@/lib/security';
+import { uuidSchema, userRoleSchema, validateInput } from '@/lib/validation';
 
 export interface AdminStats {
     totalUsers: number;
@@ -32,6 +34,14 @@ export interface HostelWithOwner {
 
 // Get admin dashboard statistics
 export async function getAdminStats(): Promise<AdminStats> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized admin stats access');
+        return { totalUsers: 0, totalHostels: 0, approvedHostels: 0, totalVacantBeds: 0 };
+    }
+
     const supabase = await createClient();
 
     const [usersResult, hostelsResult, approvedResult, bedsResult] = await Promise.all([
@@ -53,6 +63,14 @@ export async function getAdminStats(): Promise<AdminStats> {
 
 // Get all users for admin
 export async function getAllUsers(): Promise<UserWithDetails[]> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized user list access');
+        return [];
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -70,6 +88,21 @@ export async function getAllUsers(): Promise<UserWithDetails[]> {
 
 // Toggle user block status
 export async function toggleUserBlock(userId: string, isBlocked: boolean): Promise<boolean> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized block attempt');
+        return false;
+    }
+
+    // SECURITY: Validate user ID
+    const validation = validateInput(uuidSchema, userId);
+    if (!validation.success) {
+        console.error('Invalid user ID');
+        return false;
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase
@@ -87,11 +120,28 @@ export async function toggleUserBlock(userId: string, isBlocked: boolean): Promi
 
 // Update user role
 export async function updateUserRole(userId: string, role: string): Promise<boolean> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized role update attempt');
+        return false;
+    }
+
+    // SECURITY: Validate inputs
+    const idValidation = validateInput(uuidSchema, userId);
+    const roleValidation = validateInput(userRoleSchema, role);
+    
+    if (!idValidation.success || !roleValidation.success) {
+        console.error('Invalid user ID or role');
+        return false;
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase
         .from('users')
-        .update({ role })
+        .update({ role: roleValidation.data })
         .eq('id', userId);
 
     if (error) {
@@ -104,6 +154,21 @@ export async function updateUserRole(userId: string, role: string): Promise<bool
 
 // Delete user
 export async function deleteUser(userId: string): Promise<boolean> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized user delete attempt');
+        return false;
+    }
+
+    // SECURITY: Validate user ID
+    const validation = validateInput(uuidSchema, userId);
+    if (!validation.success) {
+        console.error('Invalid user ID');
+        return false;
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase
@@ -121,6 +186,14 @@ export async function deleteUser(userId: string): Promise<boolean> {
 
 // Get all hostels with owner info for admin
 export async function getAllHostelsAdmin(): Promise<HostelWithOwner[]> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized hostel list access');
+        return [];
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -175,6 +248,21 @@ export async function getAllHostelsAdmin(): Promise<HostelWithOwner[]> {
 
 // Toggle hostel approval
 export async function toggleHostelApproval(hostelId: string, isApproved: boolean): Promise<boolean> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized approval toggle attempt');
+        return false;
+    }
+
+    // SECURITY: Validate hostel ID
+    const validation = validateInput(uuidSchema, hostelId);
+    if (!validation.success) {
+        console.error('Invalid hostel ID');
+        return false;
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase
@@ -192,6 +280,21 @@ export async function toggleHostelApproval(hostelId: string, isApproved: boolean
 
 // Delete hostel (admin)
 export async function deleteHostelAdmin(hostelId: string): Promise<boolean> {
+    // SECURITY: Require admin role
+    try {
+        await requireRole('admin');
+    } catch {
+        console.error('Unauthorized hostel delete attempt');
+        return false;
+    }
+
+    // SECURITY: Validate hostel ID
+    const validation = validateInput(uuidSchema, hostelId);
+    if (!validation.success) {
+        console.error('Invalid hostel ID');
+        return false;
+    }
+
     const supabase = await createClient();
 
     const { error } = await supabase

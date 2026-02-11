@@ -1,7 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
-import { getStudentProfile } from '@/lib/supabase/students';
 import { getStudentTickets } from '@/lib/ticket-actions';
+import { requireStudentWithProfile } from '@/lib/auth-guard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,14 +18,11 @@ const statusConfig = {
 };
 
 export default async function StudentTicketsPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
+    // SECURITY: Require student role with active profile
+    const { profileId, hostelId } = await requireStudentWithProfile('/student/tickets');
 
-    const profile = await getStudentProfile(user.id);
-    if (!profile) redirect('/join-hostel');
-
-    const tickets = await getStudentTickets(profile.id);
+    // Backend already verifies ownership
+    const tickets = await getStudentTickets(profileId);
 
     const openCount = tickets.filter(t => t.status === 'open').length;
     const inProgressCount = tickets.filter(t => t.status === 'in_progress').length;
@@ -76,7 +71,7 @@ export default async function StudentTicketsPage() {
                                 <CardDescription>Describe your issue for the hostel owner</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <CreateTicketForm studentProfileId={profile.id} hostelId={profile.hostel_id} />
+                                <CreateTicketForm studentProfileId={profileId} hostelId={hostelId} />
                             </CardContent>
                         </Card>
                     </div>

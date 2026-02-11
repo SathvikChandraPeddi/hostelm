@@ -1,7 +1,5 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
-import { getStudentProfile } from '@/lib/supabase/students';
 import { getStudentUpdates } from '@/lib/update-actions';
+import { requireStudentWithProfile } from '@/lib/auth-guard';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
@@ -13,14 +11,10 @@ export const metadata = {
 };
 
 export default async function StudentUpdatesPage() {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
+    // SECURITY: Require student role with active profile
+    const { hostelId } = await requireStudentWithProfile('/student/updates');
 
-    const profile = await getStudentProfile(user.id);
-    if (!profile) redirect('/join-hostel');
-
-    const updates = await getStudentUpdates(profile.hostel_id);
+    const updates = await getStudentUpdates(hostelId);
     const globalCount = updates.filter((u: { is_global: boolean }) => u.is_global).length;
     const hostelCount = updates.filter((u: { is_global: boolean }) => !u.is_global).length;
 

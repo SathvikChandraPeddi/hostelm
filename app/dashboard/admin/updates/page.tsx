@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getAllUpdates } from '@/lib/update-actions';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,23 +7,17 @@ import Link from 'next/link';
 import { ArrowLeft, Megaphone, Plus, Globe, Building2 } from 'lucide-react';
 import { CreateUpdateForm } from '@/components/CreateUpdateForm';
 import { DeleteUpdateButton } from '@/components/DeleteUpdateButton';
+import { requireAdmin } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Updates | HostelM Admin',
 };
 
 export default async function AdminUpdatesPage() {
+    // SECURITY: Require admin role from database
+    await requireAdmin('/dashboard/admin/updates');
+
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
-
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-    if (profile?.role !== 'admin') redirect('/dashboard');
-
     const updates = await getAllUpdates();
 
     // Get all hostels for the hostel selector

@@ -1,5 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getOwnerHostels } from '@/lib/supabase/hostels';
 import { getHostelStudents } from '@/lib/supabase/students';
 import { getHostelPayments } from '@/lib/payment-actions';
@@ -10,6 +8,7 @@ import Link from 'next/link';
 import { AlertCircle, CheckCircle2, ArrowLeft, IndianRupee, Users, TrendingUp } from 'lucide-react';
 import { MarkPaidButton } from '@/components/MarkPaidButton';
 import { GenerateDuesButton } from '@/components/GenerateDuesButton';
+import { requireOwner } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'Payments Overview | HostelM Owner',
@@ -26,21 +25,10 @@ export default async function OwnerPaymentsPage({
 }: {
     searchParams: Promise<{ month?: string; hostel?: string }>;
 }) {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    // SECURITY: Require owner role from database
+    const authResult = await requireOwner('/dashboard/owner/payments');
 
-    if (!user) redirect('/login');
-
-    // Verify owner role
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-    if (profile?.role !== 'owner') redirect('/dashboard');
-
-    const hostels = await getOwnerHostels(user.id);
+    const hostels = await getOwnerHostels(authResult.user.id);
     if (hostels.length === 0) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">

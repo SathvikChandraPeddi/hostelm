@@ -1,11 +1,11 @@
-import { createClient } from '@/lib/supabase/server';
-import { redirect } from 'next/navigation';
 import { getAllTickets } from '@/lib/ticket-actions';
+import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ArrowLeft, Ticket, AlertCircle, Clock, CheckCircle2 } from 'lucide-react';
 import { AdminTicketCard } from '@/components/AdminTicketCard';
+import { requireAdmin } from '@/lib/auth-guard';
 
 export const metadata = {
     title: 'All Tickets | HostelM Admin',
@@ -16,17 +16,10 @@ export default async function AdminTicketsPage({
 }: {
     searchParams: Promise<{ status?: string; hostel?: string }>;
 }) {
+    // SECURITY: Require admin role from database
+    await requireAdmin('/dashboard/admin/tickets');
+
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) redirect('/login');
-
-    const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-    if (profile?.role !== 'admin') redirect('/dashboard');
-
     const resolvedParams = await searchParams;
     const selectedStatus = resolvedParams.status || 'all';
     const selectedHostel = resolvedParams.hostel || 'all';
