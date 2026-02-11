@@ -1,0 +1,20 @@
+{
+  "name": "HostelM - Find Your Perfect Hostel",
+  "short_name": "HostelM",
+  "description": "Discover and book hostels near your college or university. The easiest way to find student accommodation.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#8B5CF6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "education"],
+  "screenshots": []
+}
