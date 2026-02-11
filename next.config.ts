@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Deployment optimizations
+  poweredByHeader: false,
+  reactStrictMode: true,
+  // Ensure proper trailing slashes for consistent routing
+  trailingSlash: false,
 };
 
 export default nextConfig;
